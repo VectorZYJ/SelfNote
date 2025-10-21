@@ -2,6 +2,7 @@
 import sys
 import os
 import json
+# (改动) 导入 platformdirs 库，用于查找标准的用户数据目录
 from platformdirs import user_data_dir
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTextEdit, QVBoxLayout, QHBoxLayout,
@@ -12,10 +13,13 @@ from PySide6.QtGui import QFont, QMouseEvent, QColor, QIcon, QAction
 from PySide6.QtCore import Qt
 
 
-# ----------------- 全局路径配置 -----------------
+# ----------------- (改动) 全局路径配置 -----------------
 
 def resource_path(relative_path):
-    """获取程序内部资源的绝对路径 (icon)"""
+    """
+    获取程序内部资源的绝对路径 (专门用于加载打包进去的文件，如icon)
+    这个函数保持不变，因为它用于内部资源。
+    """
     if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
         base_path = sys._MEIPASS
     else:
@@ -23,13 +27,24 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 
-APP_NAME = "StickyNoteApp"
-APP_AUTHOR = "YourName"
+# (改动) 使用 platformdirs 来定义用户数据的存储位置
+# 1. 定义应用和开发者的名称，这将决定文件夹的名称
+APP_NAME = "SelfNoteData"
+APP_AUTHOR = "SelfNote"  # 您可以改成自己的名字或公司名
+
+# 2. 获取跨平台的用户数据目录
+#    - Windows: C:\Users\<Username>\AppData\Roaming\APP_AUTHOR\APP_NAME
+#    - macOS:   ~/Library/Application Support/APP_NAME
+#    - Linux:   ~/.local/share/APP_NAME
 APP_DATA_DIR = user_data_dir(APP_NAME, APP_AUTHOR)
+
+# 3. 确保该目录存在，如果不存在则自动创建
 os.makedirs(APP_DATA_DIR, exist_ok=True)
 
-# 推荐在macOS上使用 .png 格式作为托盘图标
-ICON_FILE = resource_path("icon.png")
+# 4. 定义最终的路径
+#    图标文件路径仍然指向内部资源
+ICON_FILE = resource_path("../icons/icon.ico")
+#    配置文件路径指向新创建的用户数据目录
 CONFIG_FILE = os.path.join(APP_DATA_DIR, "note_config.json")
 
 
@@ -39,14 +54,13 @@ class StickyNote(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("桌面便签")
-        self.base_window_flags = Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window | Qt.Tool
-        self.setWindowFlags(self.base_window_flags)
-
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Window | Qt.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
         self._drag_start_position = None
 
         self._create_ui()
-        self._load_note()  # <--- 现在调用 _load_note 是安全的
+        self._load_note()
         self._create_tray_icon()
 
     def _create_ui(self):
@@ -63,18 +77,9 @@ class StickyNote(QMainWindow):
         self.title_bar.setStyleSheet("background-color: #F8F8F0;")
 
         title_layout = QHBoxLayout(self.title_bar)
-        title_layout.setContentsMargins(5, 0, 0, 0)
+        title_layout.setContentsMargins(0, 0, 5, 0)
         title_layout.setSpacing(5)
-
-        # macOS 规范：按钮在左上角
-        quit_button = QPushButton("❌")
-        quit_button.setFixedSize(22, 22)
-        quit_button.clicked.connect(self.close)
-        quit_button.setStyleSheet("""
-            QPushButton { font-size: 10px; border: none; background-color: transparent; color: #888; }
-            QPushButton:hover { background-color: #E81123; color: white; border-radius: 4px; }
-        """)
-        title_layout.addWidget(quit_button)
+        title_layout.addStretch()
 
         self.pin_button = QPushButton("📌")
         self.pin_button.setCheckable(True)
@@ -87,19 +92,28 @@ class StickyNote(QMainWindow):
         """)
         title_layout.addWidget(self.pin_button)
 
-        title_layout.addStretch()
+        quit_button = QPushButton("❌")
+        quit_button.setFixedSize(22, 22)
+        quit_button.clicked.connect(self.close)
+        quit_button.setStyleSheet("""
+            QPushButton { font-size: 10px; border: none; background-color: transparent; color: #888; }
+            QPushButton:hover { background-color: #E81123; color: white; border-radius: 4px; }
+        """)
+        title_layout.addWidget(quit_button)
         main_layout.addWidget(self.title_bar)
 
         self.text_edit = QTextEdit()
-        self.text_edit.setFont(QFont("Helvetica Neue", 12))
+        self.text_edit.setFont(QFont("Microsoft YaHei", 12))
         self.text_edit.setPlaceholderText("在这里输入内容...")
         self.text_edit.setStyleSheet("border: none; padding: 5px;")
         main_layout.addWidget(self.text_edit, stretch=1)
 
         bottom_container = QWidget()
         bottom_layout = QHBoxLayout(bottom_container)
-        bottom_layout.setContentsMargins(5, 0, 0, 0)
+        bottom_layout.setContentsMargins(5, 0, 5, 5)
 
+        grip = QSizeGrip(self)
+        bottom_layout.addWidget(grip, 0, Qt.AlignmentFlag.AlignLeft)
         bottom_layout.addStretch()
 
         save_button = QPushButton("保存")
@@ -111,25 +125,24 @@ class StickyNote(QMainWindow):
         """)
         bottom_layout.addWidget(save_button)
 
-        grip = QSizeGrip(self)
-        bottom_layout.addWidget(grip, 0, Qt.AlignmentFlag.AlignRight)
-
         main_layout.addWidget(bottom_container)
 
         container.setStyleSheet("""
             QWidget { background-color: #FFFFF0; border: 1px solid #E0E0E0; }
         """)
+
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(18)
         shadow.setColor(QColor(0, 0, 0, 60))
         shadow.setOffset(1, 1)
         container.setGraphicsEffect(shadow)
 
-    # --- 后台逻辑方法 ---
     def _create_tray_icon(self):
+        """创建系统托盘图标及其菜单"""
         self.tray_icon = QSystemTrayIcon(self)
         self.tray_icon.setIcon(QIcon(ICON_FILE))
         self.tray_icon.setToolTip("桌面便签")
+
         tray_menu = QMenu()
         toggle_action = QAction("显示/隐藏便签", self)
         toggle_action.triggered.connect(self.toggle_visibility)
@@ -138,15 +151,18 @@ class StickyNote(QMainWindow):
         quit_action = QAction("退出", self)
         quit_action.triggered.connect(QApplication.instance().quit)
         tray_menu.addAction(quit_action)
+
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.activated.connect(self.on_tray_icon_activated)
         self.tray_icon.show()
 
     def on_tray_icon_activated(self, reason):
+        """当托盘图标被点击时调用"""
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self.toggle_visibility()
 
     def toggle_visibility(self):
+        """切换窗口的显示状态"""
         if self.isVisible():
             self.hide()
         else:
@@ -154,10 +170,13 @@ class StickyNote(QMainWindow):
             self.activateWindow()
 
     def closeEvent(self, event):
+        """当用户点击窗口的“X”按钮时，改为最小化到托盘"""
         self.hide()
         event.ignore()
 
     def _load_note(self):
+        """从配置文件加载笔记内容、窗口位置和状态。"""
+        # 此函数无需修改，因为它引用的 CONFIG_FILE 变量已经是正确的路径了
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 config = json.load(f)
@@ -169,13 +188,14 @@ class StickyNote(QMainWindow):
                     self.resize(280, 280)
                 is_on_top = config.get("always_on_top", False)
                 self.pin_button.setChecked(is_on_top)
-                # (改动) 现在调用这个函数是安全的，因为它不再调用 self.show()
                 self._update_pin_button_state(is_on_top)
         except (FileNotFoundError, json.JSONDecodeError, KeyError):
             self.resize(280, 280)
             self._update_pin_button_state(False)
 
     def _save_note(self):
+        """将当前笔记内容、窗口位置和状态保存到配置文件。"""
+        # 此函数无需修改，因为它引用的 CONFIG_FILE 变量已经是正确的路径了
         geo = self.geometry()
         config = {
             "content": self.text_edit.toPlainText(),
@@ -188,32 +208,18 @@ class StickyNote(QMainWindow):
         except Exception as e:
             print(f"保存失败: {e}")
 
-    # --- (改动) 修复置顶BUG的核心 ---
-
     def _toggle_always_on_top(self):
-        """
-        当用户点击“置顶”按钮时调用。
-        """
         is_on_top = self.pin_button.isChecked()
-        # 1. 更新窗口标志
         self._update_pin_button_state(is_on_top)
-        # 2. (新增) 立即调用 show() 来让窗口标志的更改生效
-        self.show()
 
     def _update_pin_button_state(self, is_on_top):
-        """
-        核心函数：只负责设置窗口标志，不负责显示。
-        """
+        flags = self.windowFlags()
         if is_on_top:
-            self.setWindowFlags(self.base_window_flags | Qt.WindowType.WindowStaysOnTopHint)
+            self.setWindowFlags(flags | Qt.WindowType.WindowStaysOnTopHint)
         else:
-            self.setWindowFlags(self.base_window_flags)
+            self.setWindowFlags(flags & ~Qt.WindowType.WindowStaysOnTopHint)
+        self.show()
 
-        # 重新应用透明背景属性
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        # (改动) 移除了 self.show()。这是修复启动BUG的关键。
-
-    # --- 鼠标事件 (拖动已修复) ---
     def mousePressEvent(self, event: QMouseEvent):
         if event.button() == Qt.MouseButton.LeftButton:
             if self.title_bar.geometry().contains(event.position().toPoint()):
@@ -237,7 +243,5 @@ if __name__ == "__main__":
 
     note = StickyNote()
     note.setMinimumSize(150, 120)
-
-    # 注意：这里没有 note.show()，程序启动后窗口默认隐藏
 
     sys.exit(app.exec())
